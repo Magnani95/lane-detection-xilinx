@@ -1,0 +1,9 @@
+
+#define SEQUENCE_A_0    0x40000000
+#define SEQUENCE_A_1    0x40000000
+
+#define SEQUENCE_B_0    0x402A3000
+#define SEQUENCE_B_1    0x402A3000
+
+#define MASK_ADDRESS    0x40546000
+
