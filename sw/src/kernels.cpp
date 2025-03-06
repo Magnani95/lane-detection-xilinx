@@ -1,15 +1,7 @@
 #include<general_settings.h>
 #include<kernels.h>
 #include<profiling.h>
-
-// #include<images/gaussian_input_bgr.dat.h>
-// #include<images/gaussian_output_bgr.dat.h>
-// #include<images/cvtcolor_output_bgr.dat.h>
-// #include<images/threshold_output_bgr.dat.h>
-// #include<images/filter2d_output_bgr.dat.h>
-#include<images/mask_720.h>
-// #include<images/mask_output.png.dat.h>
-
+#include<images/mask_720_py.h>
 #include "../include/LaneDetector.hpp"
 
 //	MACROs ---------------------------------------------------------------------
@@ -18,30 +10,8 @@
 //---FUNCTIONs	----------------------------------------------------------------
 //------------------------------------------------------------------------------
 
-cv::Mat mask_ocv(cv::Mat img_edges) {
-  cv::Mat output;
-  cv::Mat mask = cv::Mat::zeros(img_edges.size(), img_edges.type());
-
-
-  cv::Point pts[4] = {
-	  cv::Point(210, 720),
-	  cv::Point(550, 450),
-	  cv::Point(717, 450),
-	  cv::Point(1280, 720)
-  };
-
-  // Create a binary polygon mask
-  cv::fillConvexPoly(mask, pts, 4, cv::Scalar(255, 0, 0));
-  // Multiply the edges image and the mask to get the output
-  cv::bitwise_and(img_edges, mask, output);
-
-  return output;
-
-}
-
 void kernel_video_mixed(cv::VideoCapture cap, addr_t xtimer)
 {
-	printf("Begin\n");
 	struct memory_allocator gauss_alloc, cvt_alloc, threshold_alloc, filter2d_alloc,
 							mask_alloc;
 
@@ -59,7 +29,6 @@ void kernel_video_mixed(cv::VideoCapture cap, addr_t xtimer)
 
 	
 	// Image memory
-	printf("mage memory\n");
 	memory_allocator mem_zero, mem_one, mem_mask;
 
 	memory_allocator_init(&mem_zero, SEQUENCE_A_0,	RGB_LENGHT);
@@ -70,13 +39,10 @@ void kernel_video_mixed(cv::VideoCapture cap, addr_t xtimer)
     addr_t one = memory_allocator_alloc(& mem_one , RGB_LENGHT);
     addr_t mask_img = memory_allocator_alloc(& mem_mask , GRAY_LENGHT);
 
-	//	load first image &  mask
-	// for (size_t i=0; i!= RGB_LENGHT; i++ )
-	// 	*((unsigned char *) (zero.virt_addr + i)) = __gaussian_input_dat[i];
 	
 	printf("Load image mask\n");
 	for (size_t i=0; i!= GRAY_LENGHT; i++ ){
-		*((unsigned char *) (mask_img.virt_addr + i)) = mask_720p_png_dat[i];
+		*((unsigned char *) (mask_img.virt_addr + i)) = mask_py_png_dat[i];
 	}
 
 	//	set
@@ -87,17 +53,10 @@ void kernel_video_mixed(cv::VideoCapture cap, addr_t xtimer)
 	filter2d_kernel_set(filter2d.virt_addr, one, zero, IMG_HEIGHT, IMG_WIDTH);
 	mask_kernel_set(mask.virt_addr, zero, one, mask_img, IMG_HEIGHT, IMG_WIDTH);
 
-	printf("Mixed begin\n");
-
-	
 	LaneDetector lanedetector;  // Create the class object
 	cv::Mat frame;
 	cv::Mat img_denoise = cv::Mat::zeros(720, 1280, CV_8UC3);
-	cv::Mat img_edges;
-	cv::Mat img_mask;
-	cv::Mat img_lines;
 	std::vector<cv::Vec4i> plines;
-	std::vector<cv::Vec2f> lines;
 	std::vector<std::vector<cv::Vec4i> > left_right_lines;
 	std::vector<cv::Point> lane;
 	std::string turn;
@@ -105,18 +64,9 @@ void kernel_video_mixed(cv::VideoCapture cap, addr_t xtimer)
 
 
 	// Main algorithm starts. Iterate through every frame of the video
-	int i = 1;
 	while(true)
 	{	
 		cv::Mat output = cv::Mat::zeros(720, 1280, CV_8UC1);
-		cv::Mat kernel;
-		cv::Point anchor;
-
-		anchor = cv::Point(-1, -1);
-		kernel = cv::Mat(1, 3, CV_32F);
-		kernel.at<float>(0, 0) = -1;
-		kernel.at<float>(0, 1) = 0;
-		kernel.at<float>(0, 2) = 1;
 
 		// Capture frame
 		if (!cap.read(frame)){
@@ -124,71 +74,48 @@ void kernel_video_mixed(cv::VideoCapture cap, addr_t xtimer)
 			break;
 		}
 
-		for (size_t i=0; i!=(RGB_LENGHT); i++){
-			*((unsigned char*)(zero.virt_addr) +i) = frame.data[i];
-		}
-		
-		// Denoise the image using a Gaussian filter
+		memcpy((unsigned char*)(zero.virt_addr), frame.data, RGB_LENGHT);
 
+		// Denoise the image using a Gaussian filter
 		// img_denoise=lanedetector.deNoise(frame);
 		gaussian_kernel_run(gauss.virt_addr);
 
 		// Detect edges in the image
-
-		// img_edges=lanedetector.edgeDetector(img_denoise);
-
 		// Convert image from RGB to gray
+
 		// cv::cvtColor(img_denoise, output, cv::COLOR_BGR2GRAY);
 		cvtcolor_bgr2gray_run(cvt.virt_addr);
-
 		
 		// Binarize gray image
-	
 		// cv::threshold(output, output, 140, 255, cv::THRESH_BINARY);
-	
 		threshold_kernel_run(threshold.virt_addr);
 		
-		// Create the kernel [-1 0 1]
-		// This kernel is based on the one found in the
-		// Lane Departure Warning System by Mathworks
-
 		// Filter the binary image to obtain the edges
 		// cv::filter2D(output, output, -1, kernel, anchor, 0, cv::BORDER_DEFAULT);
 		filter2d_kernel_run(filter2d.virt_addr);
 
-	
-
 		// Mask the image so that we only get the ROI
 		// output=lanedetector.mask(output);
-
 		mask_kernel_run(mask.virt_addr);
 
-		unsigned char * source = (unsigned char *) (one.virt_addr);
-		for (size_t i=0; i!=GRAY_LENGHT; i++){
-			output.data[i] = source[i];
-		}
-		cv::imshow("Lane", output);
-		cv::waitKey(1);
+		memcpy(output.data, (unsigned char *) (one.virt_addr), GRAY_LENGHT);
 
 		// Obtain Hough lines in the cropped image
-		plines=lanedetector.houghLinesP(img_mask);
-		//CLK_MEASURE(lines=lanedetector.houghLines(img_mask), start, end)
+		plines=lanedetector.houghLinesP(output);
 		
 		if (!plines.empty()) {
 			// Separate lines into left and right lines
-			left_right_lines=lanedetector.lineSeparation(plines, img_edges);
+			left_right_lines=lanedetector.lineSeparation(plines, output);
 			// Apply regression to obtain only one line for each side of the lane
 			lane=lanedetector.regression(left_right_lines, frame);
 			// Predict the turn by determining the vanishing point of the the lines
 			turn=lanedetector.predictTurn();
 			// Plot lane detection
-			// lanedetector.plotLane(frame, lane, turn);
-			// cv::waitKey(1);
-			printf("normal branch\n");
+			lanedetector.plotLane(frame, lane, turn);
+			cv::waitKey(1);
 		}else{
 			printf("void lines\n");
 		}
-		
 	}
 	
 	//	deallocation
@@ -202,99 +129,3 @@ void kernel_video_mixed(cv::VideoCapture cap, addr_t xtimer)
 	memory_allocator_deinit (&filter2d_alloc);
 	memory_allocator_deinit (&mask_alloc);
 }
-//---
-
-
-/*
-	LaneDetector lanedetector; 
-	cv::Mat frame;
-	cv::Mat img_denoise;
-	cv::Mat img_edges;
-	cv::Mat img_mask;
-	cv::Mat img_lines;
-	cv::Mat img_translation = cv::Mat::zeros(720, 1280, CV_8UC1); 
-	//img_translation_mask =  = cv::Mat::zeros(720, 1280, CV_8UC1); 
-	std::vector<cv::Vec4i> plines;
-	std::vector<std::vector<cv::Vec4i> > left_right_lines;
-	std::vector<cv::Point> lane;
-	std::string turn;
-
-	// Main algorithm starts. Iterate through every frame of the video
-	while(true)
-	{	printf("Begin while loop\n");
-		// Capture frame
-		if(!cap.read(frame)){
-			printf("No frame");
-			break;
-		}else{
-			for (size_t i=0; i!=(RGB_LENGHT); i++)
-				*((unsigned char*)(zero.virt_addr) +i) = frame.data[i];
-		}
-		// Denoise the image using a Gaussian filter
-		img_denoise=lanedetector.deNoise(frame);
-		// printf("Gauss\n");
-		// gaussian_kernel_run(gauss.virt_addr);
-  cv::Mat output;
-  cv::Mat kernel;
-  cv::Point anchor;
-		  // Convert image from RGB to gray
-    cv::cvtColor(img_denoise, output, cv::COLOR_BGR2GRAY);
-  // Binarize gray image
-    cv::threshold(output, output, 140, 255, cv::THRESH_BINARY);
-
-		//img_edges=lanedetector.edgeDetector(img_denoise);
-		// printf("bgr2gray\n");
-		// cvtcolor_bgr2gray_run(cvt.virt_addr);
-		// printf("threshold\n");
-		// threshold_kernel_run(threshold.virt_addr);
-
-  anchor = cv::Point(-1, -1);
-  kernel = cv::Mat(1, 3, CV_32F);
-  kernel.at<float>(0, 0) = -1;
-  kernel.at<float>(0, 1) = 0;
-  kernel.at<float>(0, 2) = 1;
-
-  // Filter the binary image to obtain the edges
-  cv::filter2D(output, output, -1, kernel, anchor, 0, cv::BORDER_DEFAULT);
-
-		// printf("filter2d\n");
-		// filter2d_kernel_run(filter2d.virt_addr);
-		
-		// Mask the image so that we only get the ROI
-		img_mask=lanedetector.mask(img_edges);
-		// printf("Mask\n");
-		// mask_kernel_run(mask.virt_addr);
-
-		//Conversion from fpga to cv::mat
-		// printf("Translation\n");
-		//unsigned char *source = (unsigned char *) one.virt_addr;
-		
-		// for (size_t i=0; i!=GRAY_LENGHT; i++){
-		// 	img_translation.data[i] = source[i];
-		// }
-
-		// Obtain Hough lines in the cropped image
-		// printf("HoughP\n");
-		// plines=lanedetector.houghLinesP(img_translation);
-		plines=lanedetector.houghLinesP(output);
-		
-		if (!plines.empty()){
-			// Separate lines into left and right lines
-			left_right_lines=lanedetector.lineSeparation(plines, img_edges);
-
-			// Apply regression to obtain only one line for each side of the lane
-			lane=lanedetector.regression(left_right_lines, frame);
-
-			// Predict the turn by determining the vanishing point of the the lines
-			turn=lanedetector.predictTurn();
-
-			// Plot lane detection
-			lanedetector.plotLane(frame, lane, turn);
-
-			cv::waitKey(25);
-			printf("Proper branch\n");
-		}else{
-			printf("else branch\n");
-		}
-	}
-*/
